@@ -1,0 +1,256 @@
+name: Build Telegram iOS mod
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout mod repo (patch)
+        uses: actions/checkout@v4
+
+      - name: Write iOS mod patch
+        run: |
+          cat > ios-mod.patch <<'PATCH_EOF'
+          diff --git a/TMessagesProj/src/main/java/org/telegram/messenger/AndroidUtilities.java b/TMessagesProj/src/main/java/org/telegram/messenger/AndroidUtilities.java
+          index efa8e29..b367f63 100644
+          --- a/TMessagesProj/src/main/java/org/telegram/messenger/AndroidUtilities.java
+          +++ b/TMessagesProj/src/main/java/org/telegram/messenger/AndroidUtilities.java
+          @@ -261,6 +261,15 @@ public class AndroidUtilities {
+
+               public static Typeface bold() {
+                   if (mediumTypeface == null) {
+          +            // iOS mod: Inter SemiBold (подтягивается при сборке), если файла нет - штатный шрифт
+          +            Typeface inter = null;
+          +            try {
+          +                inter = getTypeface("fonts/inter_semibold.ttf");
+          +            } catch (Throwable ignore) {}
+          +            if (inter != null) {
+          +                mediumTypeface = inter;
+          +                return mediumTypeface;
+          +            }
+                       if (SharedConfig.useSystemBoldFont && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                           mediumTypeface = Typeface.create(null, 500, false);
+                       } else {
+          diff --git a/TMessagesProj/src/main/java/org/telegram/messenger/LiteMode.java b/TMessagesProj/src/main/java/org/telegram/messenger/LiteMode.java
+          index 6c37252..cc599e9 100644
+          --- a/TMessagesProj/src/main/java/org/telegram/messenger/LiteMode.java
+          +++ b/TMessagesProj/src/main/java/org/telegram/messenger/LiteMode.java
+          @@ -151,6 +151,10 @@ public class LiteMode {
+                       // always enabled for tablets
+                       return true;
+                   }
+          +        if (flag == FLAG_LIQUID_GLASS) {
+          +            // iOS mod: liquid glass is always on, regardless of device class / power saver
+          +            return true;
+          +        }
+                   return (getValue() & preprocessFlag(flag)) > 0;
+               }
+
+          diff --git a/TMessagesProj/src/main/java/org/telegram/messenger/SharedConfig.java b/TMessagesProj/src/main/java/org/telegram/messenger/SharedConfig.java
+          index 7efb06c..8e3e26a 100644
+          --- a/TMessagesProj/src/main/java/org/telegram/messenger/SharedConfig.java
+          +++ b/TMessagesProj/src/main/java/org/telegram/messenger/SharedConfig.java
+          @@ -315,9 +315,9 @@ public class SharedConfig {
+               public static boolean allowBigEmoji;
+               public static boolean useSystemEmoji;
+               public static boolean useSystemBoldFont;
+          -    public static int fontSize = 16;
+          +    public static int fontSize = 17;
+               public static boolean fontSizeIsDefault;
+          -    public static int bubbleRadius = 17;
+          +    public static int bubbleRadius = 20;
+               public static int ivFontSize = 16;
+               public static boolean proxyRotationEnabled;
+               public static int proxyRotationTimeout;
+          @@ -610,9 +610,9 @@ public class SharedConfig {
+                       hasCameraCache = preferences.contains("cameraCache");
+                       roundCamera16to9 = true;
+                       repeatMode = preferences.getInt("repeatMode", 0);
+          -            fontSize = preferences.getInt("fons_size", AndroidUtilities.isTablet() && !AndroidUtilities.isFold() ? 18 : 16);
+          +            fontSize = preferences.getInt("fons_size", AndroidUtilities.isTablet() && !AndroidUtilities.isFold() ? 18 : 17);
+                       fontSizeIsDefault = !preferences.contains("fons_size");
+          -            bubbleRadius = preferences.getInt("bubbleRadius", 17);
+          +            bubbleRadius = preferences.getInt("bubbleRadius", 20);
+                       ivFontSize = preferences.getInt("iv_font_size", fontSize);
+                       allowBigEmoji = preferences.getBoolean("allowBigEmoji", true);
+                       useSystemEmoji = preferences.getBoolean("useSystemEmoji", false);
+          @@ -707,7 +707,7 @@ public class SharedConfig {
+               public static void updateTabletConfig() {
+                   if (fontSizeIsDefault) {
+                       SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
+          -            fontSize = preferences.getInt("fons_size", AndroidUtilities.isTablet() && !AndroidUtilities.isFold() ? 18 : 16);
+          +            fontSize = preferences.getInt("fons_size", AndroidUtilities.isTablet() && !AndroidUtilities.isFold() ? 18 : 17);
+                       ivFontSize = preferences.getInt("iv_font_size", fontSize);
+                   }
+               }
+          diff --git a/TMessagesProj/src/main/java/org/telegram/ui/ActionBar/MessageDrawable.java b/TMessagesProj/src/main/java/org/telegram/ui/ActionBar/MessageDrawable.java
+          index 9242105..b538991 100644
+          --- a/TMessagesProj/src/main/java/org/telegram/ui/ActionBar/MessageDrawable.java
+          +++ b/TMessagesProj/src/main/java/org/telegram/ui/ActionBar/MessageDrawable.java
+          @@ -34,6 +34,9 @@ public class MessageDrawable extends Drawable {
+               private Shader gradientShader;
+               private int currentBackgroundHeight;
+               public Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+          +    // iOS mod: контурные пузыри как в Swiftgram
+          +    public static final boolean IOS_OUTLINE = true;
+          +    private Paint outlinePaint;
+               private Paint selectedPaint;
+               private int currentColor;
+               private int currentGradientColor1;
+          @@ -559,7 +562,7 @@ public class MessageDrawable extends Drawable {
+
+               public void draw(Canvas canvas, Paint paintToUse) {
+                   Rect bounds = getBounds();
+          -        if (paintToUse == null && paint.getStyle() == Paint.Style.FILL && gradientShader == null && overrideRoundRadius == 0 && overrideRounding <= 0) {
+          +        if (!IOS_OUTLINE && paintToUse == null && paint.getStyle() == Paint.Style.FILL && gradientShader == null && overrideRoundRadius == 0 && overrideRounding <= 0) {
+                       Drawable background = getBackgroundDrawable();
+                       if (background != null) {
+                           background.setBounds(bounds);
+          @@ -618,6 +621,16 @@ public class MessageDrawable extends Drawable {
+                   }
+
+                   canvas.drawPath(path, p);
+          +        if (IOS_OUTLINE && paintToUse == null && currentType != TYPE_PREVIEW) {
+          +            if (outlinePaint == null) {
+          +                outlinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+          +                outlinePaint.setStyle(Paint.Style.STROKE);
+          +                outlinePaint.setStrokeJoin(Paint.Join.ROUND);
+          +            }
+          +            outlinePaint.setStrokeWidth(Math.max(1f, dp(1) * 0.9f));
+          +            outlinePaint.setColor(ColorUtils.setAlphaComponent(Color.WHITE, (int) (150 * alpha / 255f)));
+          +            canvas.drawPath(path, outlinePaint);
+          +        }
+                   if (gradientShader != null && isSelected && paintToUse == null) {
+                       int color = getColor(Theme.key_chat_outBubbleGradientSelectedOverlay);
+                       selectedPaint.setColor(ColorUtils.setAlphaComponent(color, (int) (Color.alpha(color) * alpha / 255f)));
+          diff --git a/TMessagesProj/src/main/java/org/telegram/ui/Cells/DialogCell.java b/TMessagesProj/src/main/java/org/telegram/ui/Cells/DialogCell.java
+          index 0fae7fd..ba84a13 100644
+          --- a/TMessagesProj/src/main/java/org/telegram/ui/Cells/DialogCell.java
+          +++ b/TMessagesProj/src/main/java/org/telegram/ui/Cells/DialogCell.java
+          @@ -169,8 +169,8 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
+               public ShareDialogCell.RepostStoryDrawable repostStoryDrawable;
+               public int avatarStart = 11;
+               public int messagePaddingStart = 72;
+          -    public int heightDefault = 70;
+          -    public int heightThreeLines = 76;
+          +    public int heightDefault = 80;
+          +    public int heightThreeLines = 86;
+               public int addHeightForTags = 3;
+               public int addForumHeightForTags = 11;
+               public TLRPC.TL_forumTopic forumTopic;
+          @@ -1254,10 +1254,10 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
+                       Theme.dialogs_messagePaint[0].setTextSize(dp(16));
+                       Theme.dialogs_messagePrintingPaint[0].setTextSize(dp(16));
+
+          -            Theme.dialogs_namePaint[1].setTextSize(dp(16));
+          -            Theme.dialogs_nameEncryptedPaint[1].setTextSize(dp(16));
+          -            Theme.dialogs_messagePaint[1].setTextSize(dp(15));
+          -            Theme.dialogs_messagePrintingPaint[1].setTextSize(dp(15));
+          +            Theme.dialogs_namePaint[1].setTextSize(dp(18));
+          +            Theme.dialogs_nameEncryptedPaint[1].setTextSize(dp(18));
+          +            Theme.dialogs_messagePaint[1].setTextSize(dp(17));
+          +            Theme.dialogs_messagePrintingPaint[1].setTextSize(dp(17));
+
+                       Theme.dialogs_messagePaint[1].setColor(Theme.dialogs_messagePaint[1].linkColor = Theme.getColor(Theme.key_chats_message_threeLines, resourcesProvider));
+                       paintIndex = 1;
+          diff --git a/TMessagesProj/src/main/res/values/strings.xml b/TMessagesProj/src/main/res/values/strings.xml
+          index db9de75..6da681b 100644
+          --- a/TMessagesProj/src/main/res/values/strings.xml
+          +++ b/TMessagesProj/src/main/res/values/strings.xml
+          @@ -1,6 +1,6 @@
+           <?xml version="1.0" encoding="utf-8"?>
+           <resources>
+          -    <string name="AppName">Telegram</string>
+          +    <string name="AppName">Telegram iOS</string>
+               <string name="AppNameBeta">Telegram Beta</string>
+               <string name="LanguageName">English</string>
+               <string name="English">English</string>
+          diff --git a/gradle.properties b/gradle.properties
+          index 4a5efa1..bfd429a 100644
+          --- a/gradle.properties
+          +++ b/gradle.properties
+          @@ -15,7 +15,7 @@
+           #Sat Mar 12 05:53:50 MSK 2016
+           APP_VERSION_CODE=7237
+           APP_VERSION_NAME=13.1.1
+          -APP_PACKAGE=org.telegram.messenger
+          +APP_PACKAGE=org.telegram.messenger.web
+           IS_PRIVATE=false
+           RELEASE_KEY_PASSWORD=android
+           RELEASE_KEY_ALIAS=androidkey
+          PATCH_EOF
+
+      - name: Clone Telegram sources (pinned 13.1.1)
+        run: |
+          git clone https://github.com/DrKLO/Telegram.git tg
+          cd tg
+          git checkout 3de37c8cfb039452be7398909461da6288babf15
+
+      - name: Apply iOS mod patch
+        run: |
+          cd tg
+          git apply --whitespace=nowarn ../ios-mod.patch
+          git diff --stat
+
+      - name: Set own api_id / api_hash (optional secrets)
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          cd tg
+          F=TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java
+          if [ -n "$TG_API_ID" ] && [ -n "$TG_API_HASH" ]; then
+            sed -i "s/public static int APP_ID = .*;/public static int APP_ID = $TG_API_ID;/" $F
+            sed -i "s/public static String APP_HASH = \".*\";/public static String APP_HASH = \"$TG_API_HASH\";/" $F
+            echo "Using custom api_id"
+          else
+            echo "No TG_API_ID/TG_API_HASH secrets set - using defaults from the repo"
+          fi
+
+      - name: Download Inter font (SIL OFL) for iOS-like bold text
+        run: |
+          mkdir -p tmp_inter && cd tmp_inter
+          curl -fsSL -o inter.zip https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip || true
+          if [ -f inter.zip ]; then
+            unzip -q -o inter.zip || true
+            F=$(find . -iname 'Inter-SemiBold.ttf' | head -n1)
+            if [ -n "$F" ]; then
+              cp "$F" ../tg/TMessagesProj/src/main/assets/fonts/inter_semibold.ttf
+              echo "Inter SemiBold installed"
+            else
+              echo "Inter-SemiBold.ttf not found - stock font will be used"
+            fi
+          else
+            echo "Could not download Inter - stock font will be used"
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install SDK / NDK / CMake
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build APK
+        run: |
+          cd tg
+          chmod +x gradlew
+          ./gradlew :TMessagesProj_App:assembleAfatRelease --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-ios-mod
+          path: tg/TMessagesProj_App/build/outputs/apk/afat/release/app.apk
