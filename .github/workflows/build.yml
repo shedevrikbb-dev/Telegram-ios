@@ -9,6 +9,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    env:
+      CCACHE_DIR: /home/runner/.ccache
     steps:
       - name: Checkout mod repo (patch)
         uses: actions/checkout@v4
@@ -46,6 +48,16 @@ jobs:
           git apply --whitespace=nowarn ../ios-mod.patch
           git diff --stat
 
+      - name: Install ccache and restore its cache
+        run: sudo apt-get install -y ccache > /dev/null 2>&1 || true; ccache --version | head -n1 || true
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ github.run_id }}
+          restore-keys: ccache-
+
       - name: Speed up build (arm64 only, no debug symbols)
         run: |
           cd tg
@@ -55,6 +67,11 @@ jobs:
           sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=768m/' gradle.properties
           sed -i 's/^org.gradle.parallel=true/org.gradle.parallel=false/' gradle.properties
           grep -n 'jvmargs\|parallel' gradle.properties
+          if command -v ccache > /dev/null 2>&1; then
+            ccache --max-size=3G
+            sed -i "s#'-DANDROID_PLATFORM=android-23'#'-DANDROID_PLATFORM=android-23', '-DCMAKE_C_COMPILER_LAUNCHER=ccache', '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache'#" TMessagesProj/build.gradle TMessagesProj_App/build.gradle
+            grep -n 'COMPILER_LAUNCHER' TMessagesProj/build.gradle TMessagesProj_App/build.gradle | cut -c1-200
+          fi
 
       - name: Set own api_id / api_hash (optional secrets)
         env:
@@ -106,6 +123,13 @@ jobs:
           cd tg
           chmod +x gradlew
           ./gradlew :TMessagesProj_App:assembleAfatRelease --no-daemon --stacktrace --console=plain --max-workers=2
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ github.run_id }}
 
       - name: Diagnostics (only on failure)
         if: failure() || cancelled()
