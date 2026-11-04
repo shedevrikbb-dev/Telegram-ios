@@ -13,6 +13,13 @@ jobs:
       - name: Checkout mod repo (patch)
         uses: actions/checkout@v4
 
+      - name: Free disk space and add swap (runner has only 7 GB RAM)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/local/.ghcup /opt/hostedtoolcache/CodeQL || true
+          sudo fallocate -l 8G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile || true
+          free -h
+          df -h /
+
       - name: Unpack mod.zip
         run: |
           test -f mod.zip || { echo "mod.zip not found in repo root"; exit 1; }
@@ -45,6 +52,9 @@ jobs:
           sed -i 's/abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"/abiFilters "arm64-v8a"/' TMessagesProj_App/build.gradle
           sed -i "s/ndk.debugSymbolLevel = 'FULL'/ndk.debugSymbolLevel = 'NONE'/" TMessagesProj_App/build.gradle
           grep -n 'abiFilters\|debugSymbolLevel' TMessagesProj_App/build.gradle
+          sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=768m/' gradle.properties
+          sed -i 's/^org.gradle.parallel=true/org.gradle.parallel=false/' gradle.properties
+          grep -n 'jvmargs\|parallel' gradle.properties
 
       - name: Set own api_id / api_hash (optional secrets)
         env:
@@ -95,7 +105,14 @@ jobs:
         run: |
           cd tg
           chmod +x gradlew
-          ./gradlew :TMessagesProj_App:assembleAfatRelease --no-daemon --stacktrace --console=plain
+          ./gradlew :TMessagesProj_App:assembleAfatRelease --no-daemon --stacktrace --console=plain --max-workers=2
+
+      - name: Diagnostics (only on failure)
+        if: failure() || cancelled()
+        run: |
+          free -h || true
+          df -h / || true
+          sudo dmesg 2>/dev/null | grep -i -E "out of memory|oom|killed process" | tail -n 10 || true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
