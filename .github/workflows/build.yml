@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 240
     steps:
       - name: Checkout mod repo (patch)
         uses: actions/checkout@v4
@@ -38,6 +38,13 @@ jobs:
           cd tg
           git apply --whitespace=nowarn ../ios-mod.patch
           git diff --stat
+
+      - name: Speed up build (arm64 only, no debug symbols)
+        run: |
+          cd tg
+          sed -i 's/abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"/abiFilters "arm64-v8a"/' TMessagesProj_App/build.gradle
+          sed -i "s/ndk.debugSymbolLevel = 'FULL'/ndk.debugSymbolLevel = 'NONE'/" TMessagesProj_App/build.gradle
+          grep -n 'abiFilters\|debugSymbolLevel' TMessagesProj_App/build.gradle
 
       - name: Set own api_id / api_hash (optional secrets)
         env:
@@ -88,7 +95,7 @@ jobs:
         run: |
           cd tg
           chmod +x gradlew
-          ./gradlew :TMessagesProj_App:assembleAfatRelease --no-daemon --stacktrace
+          ./gradlew :TMessagesProj_App:assembleAfatRelease --no-daemon --stacktrace --console=plain
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
