@@ -29,6 +29,9 @@ jobs:
           git remote add origin https://github.com/DrKLO/Telegram.git
           git fetch --depth 1 origin 3de37c8cfb039452be7398909461da6288babf15
           git checkout -q FETCH_HEAD
+          git submodule sync --recursive
+          git submodule update --init --recursive --depth 1 --jobs 8 || git submodule update --init --recursive --jobs 8
+          ls TMessagesProj_Modules/media/core_settings.gradle
 
       - name: Apply iOS mod patch
         run: |
