@@ -30,6 +30,10 @@ jobs:
           test -n "$P" || { echo "ios-mod.patch not found inside mod.zip"; exit 1; }
           cp "$P" ios-mod.patch
           echo "Patch lines: $(wc -l < ios-mod.patch)"
+          echo "mod.zip size: $(stat -c %s mod.zip) bytes"
+          echo "patch sha256: $(sha256sum ios-mod.patch | cut -c1-16)"
+          if grep -q "Настройки Astralgram" ios-mod.patch; then echo "PATCH VERSION: Astralgram (new)"; else echo "PATCH VERSION: OLD (no Astralgram marker)"; fi
+          { echo "### Сборка из mod.zip"; echo "- размер mod.zip: $(stat -c %s mod.zip) байт"; echo "- версия: $(grep -q 'Настройки Astralgram' ios-mod.patch && echo 'Astralgram (новая)' || echo 'СТАРАЯ')"; echo "- коммит: ${GITHUB_SHA::7}"; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Clone Telegram sources (pinned 13.1.1)
         run: |
@@ -138,8 +142,23 @@ jobs:
           df -h / || true
           sudo dmesg 2>/dev/null | grep -i -E "out of memory|oom|killed process" | tail -n 10 || true
 
-      - name: Upload APK
+      - name: Encrypt APK (the repo may be public, the APK contains api_id/api_hash)
+        env:
+          ARCHIVE_PASSWORD: ${{ secrets.ARCHIVE_PASSWORD }}
+        run: |
+          if [ -z "$ARCHIVE_PASSWORD" ]; then
+            echo "::error::Секрет ARCHIVE_PASSWORD не задан. APK не загружается, чтобы не раскрыть api_id/api_hash."
+            exit 1
+          fi
+          mkdir -p out
+          cp tg/TMessagesProj_App/build/outputs/apk/afat/release/app.apk out/Astralgram.apk
+          sudo apt-get install -y p7zip-full > /dev/null 2>&1 || true
+          7z a -tzip -mem=AES256 -p"$ARCHIVE_PASSWORD" out/Astralgram.zip out/Astralgram.apk > /dev/null
+          rm out/Astralgram.apk
+          ls -l out
+
+      - name: Upload encrypted APK
         uses: actions/upload-artifact@v4
         with:
-          name: telegram-ios-mod
-          path: tg/TMessagesProj_App/build/outputs/apk/afat/release/app.apk
+          name: astralgram-encrypted
+          path: out/Astralgram.zip
