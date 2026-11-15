@@ -5,9 +5,6 @@ on:
   push:
     branches: [main, master]
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -38,29 +35,17 @@ jobs:
           done
           test -n "$BEST" || { echo "no zip found in repo root"; exit 1; }
           echo "Using: $BEST"
-          [ "$BEST" = "mod.zip" ] || cp "$BEST" mod.zip
+          cp "$BEST" "$RUNNER_TEMP/pkg.zip"
           echo "BEST_ZIP=$BEST" >> "$GITHUB_ENV"
-          unzip -q -o mod.zip -d modpkg
+          unzip -q -o "$RUNNER_TEMP/pkg.zip" -d modpkg
           P=$(find modpkg -name ios-mod.patch | head -n1)
           test -n "$P" || { echo "ios-mod.patch not found inside $BEST"; exit 1; }
           cp "$P" ios-mod.patch
           echo "Patch lines: $(wc -l < ios-mod.patch)"
-          echo "mod.zip size: $(stat -c %s mod.zip) bytes"
+          echo "mod.zip size: $(stat -c %s "$RUNNER_TEMP/pkg.zip") bytes"
           echo "patch sha256: $(sha256sum ios-mod.patch | cut -c1-16)"
           if grep -q "Настройки Lumugram" ios-mod.patch; then echo "PATCH VERSION: Lumugram (new)"; else echo "PATCH VERSION: OLD (no Lumugram marker)"; fi
-          { echo "### Сборка из mod.zip"; echo "- размер mod.zip: $(stat -c %s mod.zip) байт"; echo "- версия: $(grep -q 'Настройки Lumugram' ios-mod.patch && echo 'Lumugram (новая)' || echo 'СТАРАЯ')"; echo "- коммит: ${GITHUB_SHA::7}"; } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Delete older zips from the repo
-        if: github.event_name == 'push'
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-          CH=0
-          for f in *.zip; do
-            [ -f "$f" ] || continue
-            if [ "$f" != "$BEST_ZIP" ]; then git rm -q -- "$f"; CH=1; fi
-          done
-          if [ "$CH" = 1 ]; then git commit -qm "Remove old zip files [skip ci]" && git push || true; fi
+          { echo "### Сборка из mod.zip"; echo "- размер mod.zip: $(stat -c %s "$RUNNER_TEMP/pkg.zip") байт"; echo "- версия: $(grep -q 'Настройки Lumugram' ios-mod.patch && echo 'Lumugram (новая)' || echo 'СТАРАЯ')"; echo "- коммит: ${GITHUB_SHA::7}"; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Clone Telegram sources (pinned 13.1.1)
         run: |
