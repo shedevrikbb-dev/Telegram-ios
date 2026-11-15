@@ -5,6 +5,9 @@ on:
   push:
     branches: [main, master]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,6 +17,8 @@ jobs:
     steps:
       - name: Checkout mod repo (patch)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Free disk space and add swap (runner has only 7 GB RAM)
         run: |
@@ -22,18 +27,40 @@ jobs:
           free -h
           df -h /
 
-      - name: Unpack mod.zip
+      - name: Pick newest zip and unpack
         run: |
-          test -f mod.zip || { echo "mod.zip not found in repo root"; exit 1; }
+          # any *.zip in the repo root works (e.g. "mod (1).zip"); the most recently committed one wins
+          BEST=""; BT=0
+          for f in *.zip; do
+            [ -f "$f" ] || continue
+            T=$(git log -1 --format=%ct -- "$f")
+            if [ "${T:-0}" -ge "$BT" ]; then BT=${T:-0}; BEST="$f"; fi
+          done
+          test -n "$BEST" || { echo "no zip found in repo root"; exit 1; }
+          echo "Using: $BEST"
+          [ "$BEST" = "mod.zip" ] || cp "$BEST" mod.zip
+          echo "BEST_ZIP=$BEST" >> "$GITHUB_ENV"
           unzip -q -o mod.zip -d modpkg
           P=$(find modpkg -name ios-mod.patch | head -n1)
-          test -n "$P" || { echo "ios-mod.patch not found inside mod.zip"; exit 1; }
+          test -n "$P" || { echo "ios-mod.patch not found inside $BEST"; exit 1; }
           cp "$P" ios-mod.patch
           echo "Patch lines: $(wc -l < ios-mod.patch)"
           echo "mod.zip size: $(stat -c %s mod.zip) bytes"
           echo "patch sha256: $(sha256sum ios-mod.patch | cut -c1-16)"
           if grep -q "Настройки Lumugram" ios-mod.patch; then echo "PATCH VERSION: Lumugram (new)"; else echo "PATCH VERSION: OLD (no Lumugram marker)"; fi
           { echo "### Сборка из mod.zip"; echo "- размер mod.zip: $(stat -c %s mod.zip) байт"; echo "- версия: $(grep -q 'Настройки Lumugram' ios-mod.patch && echo 'Lumugram (новая)' || echo 'СТАРАЯ')"; echo "- коммит: ${GITHUB_SHA::7}"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Delete older zips from the repo
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          CH=0
+          for f in *.zip; do
+            [ -f "$f" ] || continue
+            if [ "$f" != "$BEST_ZIP" ]; then git rm -q -- "$f"; CH=1; fi
+          done
+          if [ "$CH" = 1 ]; then git commit -qm "Remove old zip files [skip ci]" && git push || true; fi
 
       - name: Clone Telegram sources (pinned 13.1.1)
         run: |
